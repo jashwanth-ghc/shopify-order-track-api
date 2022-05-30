@@ -1,0 +1,28 @@
+service: shopify-lambda-api-test
+plugins:
+  - serverless-dotenv-plugin
+  # - serverless-esbuild
+
+# custom:
+#   esbuild:
+#     plugins: esbuild-plugins.cjs
+
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  memorySize: 128
+  timeout: 30
+  stage: ${opt:stage, 'staging'}
+  region: ap-south-1
+
+functions:
+  api:
+    handler: lambda.handler
+    events:
+      - http:
+          method: ANY
+          path: /
+      - http:
+          method: ANY
+          path: /{proxy+}
