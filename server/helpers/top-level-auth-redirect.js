@@ -3,6 +3,7 @@ module.exports =  function topLevelAuthRedirect({
   hostName,
   host,
   query,
+  baseURL=""
 }) {
   const serializedQuery = new URLSearchParams(query).toString();
   return `<!DOCTYPE html>
@@ -12,7 +13,7 @@ module.exports =  function topLevelAuthRedirect({
     <script>
       document.addEventListener('DOMContentLoaded', function () {
         if (window.top === window.self) {
-          window.location.href = '/auth?${serializedQuery}';
+          window.location.href = '${baseURL}/auth?${serializedQuery}';
         } else {
           var AppBridge = window['app-bridge'];
           var createApp = AppBridge.default;

@@ -15,11 +15,11 @@ module.exports = function verifyRequest(app, { returnHeader = true } = {}) {
       app.get("use-online-tokens")
     );
 
-    let shop = req.query.shop;
+  let shop = req.query.shop;
 
     if (session && shop && session.shop !== shop) {
       // The current request is for a different shop. Redirect gracefully.
-      return res.redirect(`/auth?shop=${shop}`);
+      return res.redirect(`${app.get("base-url")}/auth?shop=${shop}`);
     }
 
     if (session?.isActive()) {
@@ -64,16 +64,15 @@ module.exports = function verifyRequest(app, { returnHeader = true } = {}) {
             `Could not find a shop to authenticate with. Make sure you are making your XHR request with App Bridge's authenticatedFetch method.`
           );
       }
-
       res.status(403);
       res.header("X-Shopify-API-Request-Failure-Reauthorize", "1");
       res.header(
         "X-Shopify-API-Request-Failure-Reauthorize-Url",
-        `/auth?shop=${shop}`
+        `${app.get("base-url")}/auth?shop=${shop}`
       );
       res.end();
     } else {
-      res.redirect(`/auth?shop=${shop}`);
+      res.redirect(`${app.get("base-url")}/auth?shop=${shop}`);
     }
   };
 }

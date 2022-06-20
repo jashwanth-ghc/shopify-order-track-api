@@ -20,6 +20,9 @@ import { OrderDataComponent } from "./components/OrderDataPage";
 import { useState } from "react";
 
 export default function App() {  
+  console.log("SHOPIFY API KEY:",process.env.SHOPIFY_API_KEY);
+  console.log("APP PAGE BASE URL:",process.env.BASE_URL);
+  console.log("APP PAGE REGION:",process.env.REGION);
   return (
     <PolarisProvider i18n={translations}>
       <AppBridgeProvider
@@ -30,7 +33,7 @@ export default function App() {
         }}
       >
         <MyProvider>        
-          <OrderDataComponent />
+          <OrderDataComponent base1={process.env.BASE_URL}/>
         </MyProvider>
       </AppBridgeProvider>
     </PolarisProvider>

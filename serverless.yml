@@ -10,8 +10,8 @@ plugins:
 
 provider:
   name: aws
-  runtime: nodejs12.x
-  memorySize: 128
+  runtime: nodejs16.x
+  memorySize: 2048
   timeout: 30
   stage: ${opt:stage, 'staging'}
   region: ap-south-1

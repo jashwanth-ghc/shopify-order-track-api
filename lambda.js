@@ -12,7 +12,7 @@ const {createServer} = require('./server/index');
 let serverlessExpressInstance;
 
 async function setup (event, context) {
-    const {app} = await createServer();
+    const {app} = await createServer("/tmp/");
     serverlessExpressInstance = serverlessExpress({ app })
     return serverlessExpressInstance(event, context)
   }

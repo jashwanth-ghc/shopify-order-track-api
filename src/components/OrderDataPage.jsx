@@ -5,18 +5,22 @@ import { DataTable, Page, Card } from "@shopify/polaris"
 
 import { userLoggedInFetch } from "../App";
 
-export function OrderDataComponent(){
+export function OrderDataComponent({base1}){
     // const sampleProductData = [[-111,"test-product",234.12]];
     const [ orderData, setOrderData ] = useState([]);
     const app = useAppBridge();
     const fetch = userLoggedInFetch(app);
+    console.log("THE BASE is :",base1);
+    const baseURL = process.env.BASE_URL || base1 || "";
+    console.log("BASE URL:",baseURL);
+
     async function updateOrderData() {
         // console.log("Entered Update OrderData");
-        const productList = await fetch("/api/product-list").then((res) => res.json());
+        const productList = await fetch(`${baseURL}/api/product-list`).then((res) => res.json());
         console.log("products\n");
         console.log(productList);
 
-        const orderList = await fetch("/api/orders").then((res) => res.json());
+        const orderList = await fetch(`${baseURL}/api/orders`).then((res) => res.json());
         console.log("orders\n");
         console.log(orderList);
 

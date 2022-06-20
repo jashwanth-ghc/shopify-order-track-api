@@ -3,34 +3,23 @@ const { resolve } = require("path");
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const { Shopify, ApiVersion } = require("@shopify/shopify-api");
-const cron = require("node-cron");
 require("dotenv").config();
 
 const applyAuthMiddleware = require("./middleware/auth.js");
 const verifyRequest = require("./middleware/verify-request.js");
 const { addWebhookHandlers, orderWebhookTally } = require("./helpers/webhooks.js");
-const { getDbClient, getShopTokens } = require("./helpers/database.js");
+const { getDbClient, getShopTokens, SessionStore } = require("./helpers/database.js");
 const apiRoutes = require ("./middleware/apis.js");
+const { getObject } = require("../server/helpers/aws.js");
 
 const USE_ONLINE_TOKENS = false;
 const TOP_LEVEL_OAUTH_COOKIE = "shopify_top_level_oauth";
 
 const PORT = parseInt(process.env.PORT || "8081", 10);
 const isTest = process.env.NODE_ENV === "test" || !!process.env.VITE_TEST_BUILD;
-
-Shopify.Context.initialize({
-  API_KEY: process.env.SHOPIFY_API_KEY,
-  API_SECRET_KEY: process.env.SHOPIFY_API_SECRET,
-  SCOPES: process.env.SCOPES.split(","),
-  HOST_NAME: process.env.HOST.replace(/https:\/\//, ""),
-  API_VERSION: ApiVersion.April22,
-  IS_EMBEDDED_APP: true,
-  // This should be replaced with your preferred storage strategy
-  SESSION_STORAGE: new Shopify.Session.MemorySessionStorage(),
-});
-
-// Storing the currently active shops in memory will force them to re-login when your server restarts. You should
-// persist this object in your app.
+const BASE_URL = process.env.BASE_URL;
+// const BASE_URL = "";
+const awsBuildBucket = process.env.BUILD_FILES_AWS_BUCKET_UI;
 
 const ACTIVE_SHOPIFY_SHOPS = {};
 
@@ -43,17 +32,28 @@ const createServer = async function(
 ) {
   const app = express();
   const dbClient = await getDbClient();
+
+  Shopify.Context.initialize({
+    API_KEY: process.env.SHOPIFY_API_KEY,
+    API_SECRET_KEY: process.env.SHOPIFY_API_SECRET,
+    SCOPES: process.env.SCOPES.split(","),
+    HOST_NAME: process.env.HOST.replace(/https:\/\//, ""),
+    API_VERSION: ApiVersion.April22,
+    IS_EMBEDDED_APP: true,
+    // This should be replaced with your preferred storage strategy
+    SESSION_STORAGE: new SessionStore(dbClient),
+  });
+
   app.set("db-client",dbClient);
   app.set("top-level-oauth-cookie", TOP_LEVEL_OAUTH_COOKIE);
-  app.set("active-shopify-shops", ACTIVE_SHOPIFY_SHOPS);
+  // app.set("active-shopify-shops", ACTIVE_SHOPIFY_SHOPS);
   app.set("use-online-tokens", USE_ONLINE_TOKENS);
+  app.set("shopify", Shopify);
+  app.set("base-url", BASE_URL);
 
   app.use(cookieParser(Shopify.Context.API_SECRET_KEY));
 
   addWebhookHandlers(Shopify, app.get("db-client"));
-  // const cronJob = cron.schedule ("*/20 * * * * *", ( ()=> orderWebhookTally(Shopify) ) ); 
-  orderWebhookTally(Shopify, app.get("db-client"));
-
   
   applyAuthMiddleware(app);
 
@@ -95,15 +95,18 @@ const createServer = async function(
     next();
   });
 
+  app.use("/test-route", (req,res)=>{
+    res.send({msg:"Test Message"});
+  });
+
   app.use("/*", async (req, res, next) => {
     const { shop } = req.query;
-
     // Detect whether we need to reinstall the app, any request from Shopify will
     // include a shop in the query parameters.
 
     const activeShops = await getShopTokens( app.get("db-client") ) || {};
     if (activeShops[shop] === undefined && shop) {
-      res.redirect(`/auth?${new URLSearchParams(req.query).toString()}`);
+      res.redirect(`${app.get("base-url")}/auth?${new URLSearchParams(req.query).toString()}`);
     }
     // if (app.get("active-shopify-shops")[shop] === undefined && shop) {
     //   res.redirect(`/auth?${new URLSearchParams(req.query).toString()}`);
@@ -118,23 +121,50 @@ const createServer = async function(
    */
   let vite;
   if (!isProd) {
-    vite = await import("vite").then(({ createServer }) =>
-      createServer({
-        root,
-        logLevel: isTest ? "error" : "info",
-        server: {
-          port: PORT,
-          hmr: {
-            protocol: "ws",
-            host: "localhost",
-            port: 64999,
-            clientPort: 64999,
-          },
-          middlewareMode: "html",
-        },
-      })
-    );
-    app.use(vite.middlewares);
+    // vite = await import("vite").then(({ createServer }) =>
+    //   createServer({
+    //     root,
+    //     logLevel: isTest ? "error" : "info",
+    //     server: {
+    //       port: PORT,
+    //       hmr: {
+    //         protocol: "ws",
+    //         host: "localhost",
+    //         port: 64999,
+    //         clientPort: 64999,
+    //       },
+    //       middlewareMode: "html",
+    //     },
+    //   })
+    // );
+
+    app.get("/*",async (req,res,next)=>{ 
+      let objectKey = req.originalUrl.slice(1).split("?")[0];
+      if( !(objectKey ==="" || objectKey === "index.html" || objectKey.slice(0,6) == "assets") ){
+        next();
+      }
+      else{
+        objectKey = objectKey || "index.html";
+
+        const objStream = await getObject(awsBuildBucket, objectKey);
+
+        if(objectKey==="index.html"){
+        res.set("Content-Type", "text/html");
+        }
+        else if(objectKey.slice(-3) === ".js"){
+          res.set("Content-Type", "application/javascript");
+        }
+        else if(objectKey.slice(-4) === ".css"){
+          res.set("Content-Type", "text/css");
+        }
+        res.status(200);
+        objStream.Body.pipe(res);
+      }
+      
+      // res.send(`URL:${req.originalUrl}`);      
+    });
+
+    // app.use(vite.middlewares);
   } else {
     const compression = await import("compression").then(
       ({ default: fn }) => fn
@@ -144,13 +174,14 @@ const createServer = async function(
     );
     const fs = await import("fs");
     app.use(compression());
-    app.use(serveStatic(resolve("dist/client")));
+    app.use(serveStatic(resolve("/tmp/dist/client")));
     app.use("/*", (req, res, next) => {
       // Client-side routing will pick up on the correct route to render, so we always render the index here
       res
         .status(200)
         .set("Content-Type", "text/html")
-        .send(fs.readFileSync(`${process.cwd()}/dist/client/index.html`));
+        .send(fs.readFileSync(resolve("/tmp/dist/client/index.html")));
+        // .send(fs.readFileSync(`${process.cwd()}/dist/client/index.html`));
     });
   }
 

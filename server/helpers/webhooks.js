@@ -2,7 +2,7 @@ const { deleteToken,
          saveWebhookOrder,
          getShopTokens,
          getWebhookOrders } = require("./database.js");
-const { sqsClient, SendMessageCommand } = require("./aws.js");
+const { sqsClient, SendMessageCommand, deleteSchedulers } = require("./aws.js");
 
 module.exports.addWebhookHandlers  = function(Shopify, dbClient){
     Shopify.Webhooks.Registry.addHandler("APP_UNINSTALLED", {
@@ -10,6 +10,7 @@ module.exports.addWebhookHandlers  = function(Shopify, dbClient){
         webhookHandler: async (topic, shop, body) => {
           // delete ACTIVE_SHOPIFY_SHOPS[shop];
           await deleteToken(dbClient, shop);
+          await deleteSchedulers(shop);
         },
     });
 
@@ -46,7 +47,7 @@ module.exports.addWebhookHandlers  = function(Shopify, dbClient){
             console.log(response);
           }
           catch(err){
-            console.log(`AWS SQS error :\n${err}`);
+            console.log("AWS SQS error :\n", err);
           }          
         },
       });
@@ -54,32 +55,33 @@ module.exports.addWebhookHandlers  = function(Shopify, dbClient){
 
 }
 
-module.exports.orderWebhookTally = async function(Shopify, dbClient){ 
-  const shopTokens = await getShopTokens(dbClient); 
-  for (let shop in shopTokens){
-    const accessToken = shopTokens[shop];
-    const client = new Shopify.Clients.Rest(shop, accessToken);
-    const response = await client.get({
-      path:'orders',
-      query:{
-        created_at_min: (new Date( Date.now() - 1000*60*60 )).toISOString()  // orders created since last Cronjob
-      }
-    });
-    const ordersInShopify = response.body.orders;
+module.exports.orderWebhookTally = async function(dbClient, Shopify, shop){ 
+  const accessToken = await getShopTokens(dbClient, shop); 
+  // for (let shop in shopTokens){
+  //   const accessToken = shopTokens[shop];
 
-    const orderIdsInShopify = ordersInShopify.map(order=>order.id);
-    let ordersReceivedByWebhook = [];
-    const webhookOrders = await getWebhookOrders(dbClient, shop);
+  const client = new Shopify.Clients.Rest(shop, accessToken);
+  const response = await client.get({
+    path:'orders',
+    query:{
+      created_at_min: (new Date( Date.now() - 1000*60*60 )).toISOString()  // orders created since last Cronjob
+    }
+  });
+  const ordersInShopify = response.body.orders;
 
-    webhookOrders.forEach(order => {ordersReceivedByWebhook.push(order.id)});
+  const orderIdsInShopify = ordersInShopify.map(order=>order.id);
+  let ordersReceivedByWebhook = [];
+  const webhookOrders = await getWebhookOrders(dbClient, shop);
 
-    let ordersMissedByWebhook = [];
+  webhookOrders.forEach(order => {ordersReceivedByWebhook.push(order.id)});
 
-    orderIdsInShopify.forEach(orderId => {
-      if( !(ordersReceivedByWebhook.includes(orderId)) ){
-          ordersMissedByWebhook.push(orderId);
-      }
-    });
-    console.log("Orders missed:\n" + ordersMissedByWebhook.join(","));  //replace with send message
-  }
+  let ordersMissedByWebhook = [];
+
+  orderIdsInShopify.forEach(orderId => {
+    if( !(ordersReceivedByWebhook.includes(orderId)) ){
+        ordersMissedByWebhook.push(orderId);
+    }
+  });
+  console.log("Orders missed:\n" + ordersMissedByWebhook.join(","));  //replace with send to services
+  // }
 }
